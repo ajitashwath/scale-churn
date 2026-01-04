@@ -15,7 +15,7 @@ echo "Starting distributed ETL pipeline"
 
 python src/etl.py
 
-if [ $? -eq 0]; then
+if [ $? -eq 0 ]; then
     echo "ETL pipeline completed successfully."
 else
     echo "ETL pipeline failed."

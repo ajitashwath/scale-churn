@@ -1,11 +1,3 @@
-"""
-Windows compatibility shim:
-PySpark's accumulator server expects Unix domain socket classes which are
-not available on Windows. For local development on Windows we provide a
-lightweight shim that defines `UnixStreamServer` (backed by TCP) so the
-import doesn't fail. This is a development workaround — prefer running
-inside Docker or WSL for production-like behavior.
-"""
 import socketserver
 if not hasattr(socketserver, "UnixStreamServer"):
     class UnixStreamServer(socketserver.TCPServer):
@@ -31,9 +23,6 @@ import sys
 try:
     from config import spark_config as cfg
 except Exception:
-    # When running `python src/etl.py` the package import may fail; add
-    # project root to sys.path and retry. This makes the script runnable
-    # both as a module and as a standalone script in development.
     sys.path.append(os.path.dirname(os.path.dirname(__file__)))
     from config import spark_config as cfg
 
@@ -41,10 +30,84 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger("etl")
 
 
+def setup_java_home():
+    java_home = os.environ.get("JAVA_HOME")
+    if java_home:
+        java_exe = os.path.join(java_home, "bin", "java.exe")
+        if os.path.exists(java_exe):
+            logger.info("JAVA_HOME already set to: %s", java_home)
+            return
+    
+    search_paths = []
+    if os.name == 'nt':
+        local_appdata = os.environ.get("LOCALAPPDATA", "")
+        if local_appdata:
+            search_paths.append(os.path.join(local_appdata, "Java", "jdk-17"))
+        
+        program_files = os.environ.get("ProgramFiles", "")
+        program_files_x86 = os.environ.get("ProgramFiles(x86)", "")
+        
+        if program_files:
+            search_paths.extend([
+                os.path.join(program_files, "Java"),
+                os.path.join(program_files, "Eclipse Adoptium"),
+            ])
+        if program_files_x86:
+            search_paths.append(os.path.join(program_files_x86, "Java"))
+        
+        if local_appdata:
+            search_paths.append(os.path.join(local_appdata, "Programs", "Java"))
+    
+    for base_path in search_paths:
+        if not os.path.exists(base_path):
+            continue
+        
+        java_exe = os.path.join(base_path, "bin", "java.exe")
+        if os.path.exists(java_exe):
+            os.environ["JAVA_HOME"] = base_path
+            logger.info("Found Java and set JAVA_HOME to: %s", base_path)
+            return
+        
+        try:
+            for item in os.listdir(base_path):
+                jdk_path = os.path.join(base_path, item)
+                if os.path.isdir(jdk_path):
+                    java_exe = os.path.join(jdk_path, "bin", "java.exe")
+                    if os.path.exists(java_exe):
+                        os.environ["JAVA_HOME"] = jdk_path
+                        logger.info("Found Java and set JAVA_HOME to: %s", jdk_path)
+                        return
+        except (OSError, PermissionError):
+            continue
+    
+    logger.error("Java not found! Please install Java and set JAVA_HOME.")
+    logger.error("You can run: .\\setup_java.ps1")
+    raise RuntimeError(
+        "JAVA_HOME is not set and Java could not be found automatically. "
+        "Please install Java (JDK 8 or later) and set JAVA_HOME, or run setup_java.ps1"
+    )
+
+
 def get_spark(app_name: str = "spark-etl") -> SparkSession:
+    setup_java_home()
+    
     builder = SparkSession.builder.appName(app_name)
     for k, v in cfg.SPARK_CONFIGS.items():
         builder = builder.config(k, v)
+
+    if os.name == 'nt':
+        if not os.environ.get("HADOOP_HOME") and not os.environ.get("HADOOP_HOME_DIR"):
+            dummy_hadoop_home = os.path.join(os.path.expanduser("~"), ".hadoop")
+            bin_dir = os.path.join(dummy_hadoop_home, "bin")
+            os.makedirs(bin_dir, exist_ok=True)
+            
+            os.environ["HADOOP_HOME"] = dummy_hadoop_home
+            builder = builder.config("spark.hadoop.hadoop.home.dir", dummy_hadoop_home)
+        
+        os.environ["HADOOP_OPTS"] = "-Djava.library.path="
+        builder = builder.config("spark.hadoop.io.native.lib.available", "false")
+        builder = builder.config("spark.hadoop.fs.file.impl.disable.cache", "true")
+        builder = builder.config("spark.sql.sources.commitProtocolClass", "org.apache.spark.sql.execution.datasources.ManagedCommitProtocol")
 
     master = os.environ.get("SPARK_MASTER", cfg.SPARK_LOCAL)
     builder = builder.master(master)
@@ -126,8 +189,10 @@ def write_parquet(df: DataFrame, output_dir: str, table_name: str, partition_col
     out_path = os.path.join(output_dir, table_name)
     logger.info("Writing Parquet to %s", out_path)
     writer = df.write.mode("overwrite")
-    if partition_cols:
+    if partition_cols and os.name != 'nt':
         writer = writer.partitionBy(*partition_cols)
+    elif partition_cols and os.name == 'nt':
+        logger.warning("Partitioning disabled on Windows to avoid native IO issues")
     writer.parquet(out_path)
     return out_path
 
@@ -176,9 +241,9 @@ def run_etl(input_path: str = None, output_base: str = None, force_csv: bool = T
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Distributed ETL for Telco churn dataset using PySpark")
-    parser.add_argument("--input", help="Input CSV path", default=None)
-    parser.add_argument("--output", help="Base output directory for processed data", default=None)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input", default=None)
+    parser.add_argument("--output", default=None)
     return parser.parse_args()
 
 
