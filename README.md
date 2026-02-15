@@ -231,10 +231,6 @@ Test AUC: 0.XXXX
 
 AUC > 0.75 indicates reasonable churn prediction performance.
 
-## License
-
-MIT License - see LICENSE file for details.
-
 ## Contributing
 
 1. Fork the repository
