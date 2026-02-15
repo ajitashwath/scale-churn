@@ -1,5 +1,5 @@
 # Spark Scale Churn
-A Apache Spark pipeline for customer churn prediction using machine learning.
+An Apache Spark pipeline for customer churn prediction using machine learning.
 
 ## Overview
 
