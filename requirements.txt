@@ -1,0 +1,9 @@
+# Apache Spark
+pyspark==3.4.1
+
+# Data Processing
+pandas==2.0.3
+numpy==1.24.3
+
+# Type Hints (for Python < 3.9 compatibility)
+typing-extensions==4.7.1
