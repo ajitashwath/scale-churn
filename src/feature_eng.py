@@ -120,6 +120,11 @@ def get_spark(app_name: str = "spark-feature-eng") -> SparkSession:
             
             os.environ["HADOOP_HOME"] = dummy_hadoop_home
             builder = builder.config("spark.hadoop.hadoop.home.dir", dummy_hadoop_home)
+
+        # On Windows, Hadoop native libraries are usually missing, which causes
+        # UnsatisfiedLinkError in NativeIO$Windows.access0 when listing files.
+        # Tell Spark/Hadoop to skip native libs and fall back to pure-Java code.
+        builder = builder.config("spark.hadoop.io.native.lib.available", "false")
     
     master = os.environ.get("SPARK_MASTER", cfg.SPARK_LOCAL)
     spark = builder.master(master).getOrCreate()
