@@ -36,8 +36,8 @@ This will download and configure OpenJDK 17 automatically.
 ### 1. Clone and Setup
 
 ```bash
-git clone <repository-url>
-cd spark-scale-churn
+git clone https://github.com/ajitashwath/scale-churn.git
+cd scale-churn
 ```
 
 ### 2. Install Python Dependencies
